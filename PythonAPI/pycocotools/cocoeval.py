@@ -238,7 +238,7 @@ class COCOeval:
         perform evaluation for single category and image
         :return: dict (single image results)
         '''
-        DEBUG = True
+        DEBUG = False
 
         p = self.params
         if p.useCats:
@@ -352,7 +352,7 @@ class COCOeval:
         :return: None
         # TODO: Need to change 'iscrowd' to 'off' for my use case -> make sure this is the case
         '''
-        DEBUG = True
+        DEBUG = False
 
         print('Accumulating evaluation results...')
         tic = time.time()

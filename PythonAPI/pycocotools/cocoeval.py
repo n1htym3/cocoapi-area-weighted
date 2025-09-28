@@ -1,5 +1,6 @@
 __author__ = 'tsungyi'
 
+import sys
 import numpy as np
 import datetime
 import time
@@ -237,6 +238,8 @@ class COCOeval:
         perform evaluation for single category and image
         :return: dict (single image results)
         '''
+        DEBUG = True
+
         p = self.params
         if p.useCats:
             gt = self._gts[imgId,catId]
@@ -247,11 +250,21 @@ class COCOeval:
         if len(gt) == 0 and len(dt) ==0:
             return None
 
+        area_list: list[float] = []
         for g in gt:
+            area_list.append(g['area'])
             if g['ignore'] or (g['area']<aRng[0] or g['area']>aRng[1]):
                 g['_ignore'] = 1
             else:
                 g['_ignore'] = 0
+        
+        print(f"Total Area = {sum(area_list)}", file=sys.stderr)
+        area_total: int = sum(area_list)
+        area_length: int = len(area_list)
+        areaWeights: list[float] = [float((area / area_total) * area_length) for area in area_list]
+        print(f"Area Length = {area_length}", file=sys.stderr)
+        print(f"Area distribution = {areaWeights}", file=sys.stderr)
+        areaWeights = np.array(areaWeights, dtype=float)
 
         # sort dt highest score first, sort gt ignore last
         gtind = np.argsort([g['_ignore'] for g in gt], kind='mergesort')
@@ -298,6 +311,25 @@ class COCOeval:
         a = np.array([d['area']<aRng[0] or d['area']>aRng[1] for d in dt]).reshape((1, len(dt)))
         dtIg = np.logical_or(dtIg, np.logical_and(dtm==0, np.repeat(a,T,0)))
         # store results for given image and category
+
+        gtIds = [g['id'] for g in gt]
+
+        self._print("\n\n------------------------------------------------ [0] ------------------------------------------------", DEBUG)
+        self._print(f"dtScores = {[d['score'] for d in dt]}", DEBUG)
+        self._print(f"dtIds = {[d['id'] for d in dt]}", DEBUG)
+        self._print(f"gtIds = {gtIds}", DEBUG)
+        self._print(f"areaWeights = {areaWeights}", DEBUG)
+        self._print(f"dtm = {dtm}", DEBUG)
+
+        weights = np.zeros_like(dtm, dtype=float)
+
+        incremented_value = gtIds[0]
+        mask = dtm > 0
+        weights[mask] = areaWeights[dtm[mask].astype(int) - incremented_value]
+        self._print(f"weights = {weights}", DEBUG)
+
+        self._print("------------------------------------------------ [0] ------------------------------------------------", DEBUG)
+
         return {
                 'image_id':     imgId,
                 'category_id':  catId,
@@ -310,6 +342,7 @@ class COCOeval:
                 'dtScores':     [d['score'] for d in dt],
                 'gtIgnore':     gtIg,
                 'dtIgnore':     dtIg,
+                'weights':      weights,
             }
 
     def accumulate(self, p = None):
@@ -317,7 +350,10 @@ class COCOeval:
         Accumulate per image evaluation results and store the result in self.eval
         :param p: input params for evaluation
         :return: None
+        # TODO: Need to change 'iscrowd' to 'off' for my use case -> make sure this is the case
         '''
+        DEBUG = True
+
         print('Accumulating evaluation results...')
         tic = time.time()
         if not self.evalImgs:
@@ -326,6 +362,9 @@ class COCOeval:
         if p is None:
             p = self.params
         p.catIds = p.catIds if p.useCats == 1 else [-1]
+        
+        self._print("\n\n------------------------------------------------ [1] ------------------------------------------------", DEBUG)
+
         T           = len(p.iouThrs)
         R           = len(p.recThrs)
         K           = len(p.catIds) if p.useCats else 1
@@ -335,6 +374,20 @@ class COCOeval:
         recall      = -np.ones((T,K,A,M))
         scores      = -np.ones((T,R,K,A,M))
 
+        self._print(f"p.iouThrs = {p.iouThrs}", DEBUG)
+        self._print(f"p.recThrs = {p.recThrs}", DEBUG)
+        self._print(f"p.catIds = {p.catIds}", DEBUG)
+        self._print(f"p.areaRng = {p.areaRng}", DEBUG)
+        self._print(f"p.maxDets = {p.maxDets}\n", DEBUG)
+
+        self._print(f"T = {T}", DEBUG)
+        self._print(f"R = {R}", DEBUG)
+        self._print(f"K = {K}", DEBUG)
+        self._print(f"A = {A}", DEBUG)
+        self._print(f"M = {M}", DEBUG)
+
+        self._print("------------------------------------------------ [1] ------------------------------------------------", DEBUG)
+
         # create dictionary for future indexing
         _pe = self._paramsEval
         catIds = _pe.catIds if _pe.useCats else [-1]
@@ -342,41 +395,90 @@ class COCOeval:
         setA = set(map(tuple, _pe.areaRng))
         setM = set(_pe.maxDets)
         setI = set(_pe.imgIds)
+
+        self._print("------------------------------------------------ [2] ------------------------------------------------", DEBUG)
+
         # get inds to evaluate
         k_list = [n for n, k in enumerate(p.catIds)  if k in setK]
-        m_list = [m for n, m in enumerate(p.maxDets) if m in setM]
+        m_list = [m for n, m in enumerate(p.maxDets) if m in setM]  # TODO: Change [1, 10, 100] (potentially to just [100], need to check fields count - avg/q3/stdev) 
         a_list = [n for n, a in enumerate(map(lambda x: tuple(x), p.areaRng)) if a in setA]
         i_list = [n for n, i in enumerate(p.imgIds)  if i in setI]
         I0 = len(_pe.imgIds)
         A0 = len(_pe.areaRng)
+
+        self._print(f"k_list = {k_list}", DEBUG)
+        self._print(f"m_list = {m_list}", DEBUG)
+        self._print(f"a_list = {a_list}", DEBUG)
+        self._print(f"i_list = {i_list}", DEBUG)
+        self._print(f"I0 = {I0}", DEBUG)
+        self._print(f"A0 = {A0}", DEBUG)
+
+        self._print("------------------------------------------------ [2] -----------------------------------------------", DEBUG)
+
         # retrieve E at each category, area range, and max number of detections
         for k, k0 in enumerate(k_list):
             Nk = k0*A0*I0
             for a, a0 in enumerate(a_list):
                 Na = a0*I0
                 for m, maxDet in enumerate(m_list):
+
+
                     E = [self.evalImgs[Nk + Na + i] for i in i_list]
                     E = [e for e in E if not e is None]
                     if len(E) == 0:
                         continue
                     dtScores = np.concatenate([e['dtScores'][0:maxDet] for e in E])
-
                     # different sorting method generates slightly different results.
                     # mergesort is used to be consistent as Matlab implementation.
                     inds = np.argsort(-dtScores, kind='mergesort')
                     dtScoresSorted = dtScores[inds]
-
+                    # Fix to work with mapped 
                     dtm  = np.concatenate([e['dtMatches'][:,0:maxDet] for e in E], axis=1)[:,inds]
+                    weights  = np.concatenate([e['weights'][:,0:maxDet] for e in E], axis=1)[:,inds]
                     dtIg = np.concatenate([e['dtIgnore'][:,0:maxDet]  for e in E], axis=1)[:,inds]
                     gtIg = np.concatenate([e['gtIgnore'] for e in E])
-                    npig = np.count_nonzero(gtIg==0 )
+                    npig = np.count_nonzero(gtIg==0)
                     if npig == 0:
+                        self._print("[ALERT]: npig == 0", DEBUG)
                         continue
+
+                    self._print("------------------------------------ [3] ------------------------------------", DEBUG)
+
+                    self._print(f"dtScores = {dtScores}", DEBUG)
+                    self._print(f"inds = {inds}", DEBUG)
+                    self._print(f"dtScoresSorted = {dtScoresSorted}", DEBUG)
+
+                    self._print(f"dtm = {dtm}", DEBUG)
+                    self._print(f"dtIg = {dtIg}", DEBUG)
+                    self._print(f"gtIg = {gtIg}", DEBUG)
+                    self._print(f"npig = {npig}", DEBUG)
+
+                    self._print("------------------------------------ [3] ------------------------------------", DEBUG)
+                    self._print("------------------------------------ [4] ------------------------------------", DEBUG)
+
                     tps = np.logical_and(               dtm,  np.logical_not(dtIg) )
                     fps = np.logical_and(np.logical_not(dtm), np.logical_not(dtIg) )
+                    
+                    self._print(f"tps = {tps}", DEBUG)
+
+                    tps = tps.astype(dtype=float)
+                    tps *= weights
+
+                    fps = fps.astype(dtype=float)
+                    fps *= weights
+
+                    self._print(f"tps_weighted = {tps}", DEBUG)  
+                    self._print(f"fps_weighted = {fps}", DEBUG)  
 
                     tp_sum = np.cumsum(tps, axis=1).astype(dtype=float)
                     fp_sum = np.cumsum(fps, axis=1).astype(dtype=float)
+
+                    self._print(f"fps = {fps}", DEBUG)
+                    self._print(f"tp_sum = {tp_sum}", DEBUG)
+                    self._print(f"fp_sum = {fp_sum}", DEBUG)
+
+                    self._print("------------------------------------ [4] ------------------------------------", DEBUG)
+                    
                     for t, (tp, fp) in enumerate(zip(tp_sum, fp_sum)):
                         tp = np.array(tp)
                         fp = np.array(fp)
@@ -491,6 +593,10 @@ class COCOeval:
         elif iouType == 'keypoints':
             summarize = _summarizeKps
         self.stats = summarize()
+
+    def _print(self, message: str, debug: bool):
+        if debug:
+            print(message, file=sys.stderr)
 
     def __str__(self):
         self.summarize()

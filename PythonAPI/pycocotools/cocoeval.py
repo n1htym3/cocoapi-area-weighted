@@ -258,13 +258,13 @@ class COCOeval:
             else:
                 g['_ignore'] = 0
         
-        print(f"Total Area = {sum(area_list)}", file=sys.stderr)
         area_total: int = sum(area_list)
         area_length: int = len(area_list)
         areaWeights: list[float] = [float((area / area_total) * area_length) for area in area_list]
-        print(f"Area Length = {area_length}", file=sys.stderr)
-        print(f"Area distribution = {areaWeights}", file=sys.stderr)
         areaWeights = np.array(areaWeights, dtype=float)
+        self._print(f"Total Area = {area_total}", DEBUG)
+        self._print(f"Area Length = {area_length}", DEBUG)
+        self._print(f"Area distribution = {areaWeights}", DEBUG)
 
         # sort dt highest score first, sort gt ignore last
         gtind = np.argsort([g['_ignore'] for g in gt], kind='mergesort')

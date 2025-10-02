@@ -323,7 +323,7 @@ class COCOeval:
 
         weights = np.zeros_like(dtm, dtype=float)
 
-        incremented_value = gtIds[0]
+        incremented_value = gtIds[0] if len(gtIds) != 0 else 0  # ! Not sure if this fixes the issue, what to do when gtm=0 
         mask = dtm > 0
         weights[mask] = areaWeights[dtm[mask].astype(int) - incremented_value]
         self._print(f"weights = {weights}", DEBUG)
